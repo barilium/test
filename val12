@@ -1,0 +1,754 @@
+--[[
+    ╔══════════════════════════════════════════════════════════════════════════════╗
+    ║                        KANISTAY KEY VALIDATOR v4.0                           ║
+    ║                     ENHANCED DEBUG & SECURITY SYSTEM                         ║
+    ║                        COMPATIBLE WITH LUA 5.1/5.2                          ║
+    ╚══════════════════════════════════════════════════════════════════════════════╝
+]]--
+
+-- CRITICAL SECURITY CONFIGURATION
+local SECURITY_CONFIG = {
+    MASTER_TOKEN = "KANI_SECURE_2024_V4",
+    SIGNATURE_KEY = "KanistayMasterSig2024Enhanced",
+    PRIMARY_XOR_KEY = "KanistaySecureXOR2024Enhanced",
+    SECONDARY_XOR_KEY = "ValidatorEncrypt2024Enhanced",
+    API_VALIDATION_HASH = "9f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c",
+    SESSION_TOKEN = tostring(math.random(100000, 999999)) .. "_" .. tostring(os.time()),
+    DEBUG_MODE = false, -- Debug spam'i azaltmak için false yaptım
+}
+
+-- SUPABASE CONFIGURATION
+local SUPABASE_CONFIG = {
+    URL = "https://nheljqlonhodbgpcfkww.supabase.co",
+    ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5oZWxqcWxvbmhvZGJncGNma3d3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTE5NzQ2MjQsImV4cCI6MjA2NzU1MDYyNH0.MtcA4YjKFWKsSPQMUG-SXOA1Ue1dml6v5Urdr0ISMnQ",
+    SERVICE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5oZWxqcWxvbmhvZGJncGNma3d3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1MTk3NDYyNCwiZXhwIjoyMDY3NTUwNjI0fQ.0nspphu2HDg-irLhHQirwoJPHAUSMqEFEJvmq5FgK0g",
+}
+
+local KeyValidator = {}
+
+-- Lua 5.1/5.2 compatible XOR function
+local function xorByte(a, b)
+    local result = 0
+    local bitval = 1
+    while a > 0 or b > 0 do
+        if a % 2 ~= b % 2 then
+            result = result + bitval
+        end
+        bitval = bitval * 2
+        a = math.floor(a / 2)
+        b = math.floor(b / 2)
+    end
+    return result
+end
+
+-- Debug and logging system
+local DebugLogger = {
+    logs = {},
+    maxLogs = 50, -- Azalttım
+    lastLogTime = 0,
+}
+
+function DebugLogger:log(eventType, message, data)
+    if not SECURITY_CONFIG.DEBUG_MODE then return end
+    
+    -- Rate limiting for debug logs
+    local currentTime = os.time()
+    if currentTime - self.lastLogTime < 1 then
+        return -- Skip if less than 1 second passed
+    end
+    self.lastLogTime = currentTime
+    
+    local logEntry = {
+        timestamp = currentTime,
+        eventType = eventType,
+        message = message,
+        data = data or {},
+    }
+    
+    table.insert(self.logs, logEntry)
+    
+    -- Keep only last maxLogs entries
+    if #self.logs > self.maxLogs then
+        table.remove(self.logs, 1)
+    end
+    
+    -- Print to console (only important events)
+    if eventType == "ERROR" or eventType == "CRITICAL" or eventType == "VALIDATION" then
+        print(string.format("[DEBUG] [%s] %s", eventType, message))
+    end
+end
+
+function DebugLogger:sendToDatabase(logEntry)
+    -- Simplified - no database logging for now to avoid spam
+    return
+end
+
+function DebugLogger:getLogs()
+    return self.logs
+end
+
+function DebugLogger:clearLogs()
+    self.logs = {}
+end
+
+-- System state with enhanced tracking
+local SystemState = {
+    initialized = false,
+    setupAllowed = false,
+    validationAllowed = false,
+    securityLevel = 0,
+    lastSecurityCheck = 0,
+    connectionStatus = "unknown",
+    lastConnectionTest = 0,
+    errorCount = 0,
+    successCount = 0,
+}
+
+-- Cache system with enhanced security
+local SecureCache = {
+    settings = {},
+    userStatus = {},
+    notifications = {},
+    lastUpdate = 0,
+    cacheSignature = "",
+    connectionHealth = {},
+}
+
+-- Protected flags with validation
+local ProtectedFlags = {
+    isPremium = false,
+    isBanned = false,
+    isValidated = false,
+    keylessMode = false,
+    hwidCheck = true,
+    maintenanceMode = false,
+    setupComplete = false,
+}
+
+-- Enhanced security utilities
+local function generateSecureHash(data)
+    if not data or data == "" then
+        return "0"
+    end
+    local hash = 0
+    for i = 1, #data do
+        hash = ((hash * 31) + string.byte(data, i)) % 2147483647
+    end
+    return tostring(hash)
+end
+
+-- Lua 5.1/5.2 compatible XOR encryption
+local function xorEncrypt(data, key)
+    if not data or not key or data == "" or key == "" then
+        return ""
+    end
+    
+    local result = {}
+    local keyLen = #key
+    for i = 1, #data do
+        local char = string.byte(data, i)
+        local keyChar = string.byte(key, ((i - 1) % keyLen) + 1)
+        table.insert(result, string.char(xorByte(char, keyChar)))
+    end
+    return table.concat(result)
+end
+
+local function base64Encode(data)
+    if not data or data == "" then
+        return ""
+    end
+    
+    local chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+    local result = ''
+    
+    for i = 1, #data, 3 do
+        local a, b, c = string.byte(data, i, i + 2)
+        b = b or 0
+        c = c or 0
+        
+        local bitmap = a * 65536 + b * 256 + c
+        
+        for j = 18, 0, -6 do
+            local index = math.floor(bitmap / math.pow(2, j)) % 64 + 1
+            result = result .. chars:sub(index, index)
+        end
+    end
+    
+    local padding_length = (3 - #data % 3) % 3
+    result = result:sub(1, #result - padding_length) .. string.rep('=', padding_length)
+    
+    return result
+end
+
+-- Create ultra-secure headers with debug info (FIXED)
+function createSecureHeaders()
+    local timestamp = tostring(os.time())
+    local nonce = tostring(math.random(100000, 999999))
+    
+    -- Multi-layer encryption with nil checks
+    local payload = (SECURITY_CONFIG.MASTER_TOKEN or "") .. "|" .. timestamp .. "|" .. nonce
+    local encrypted1 = xorEncrypt(payload, SECURITY_CONFIG.PRIMARY_XOR_KEY or "")
+    local encrypted2 = xorEncrypt(encrypted1, SECURITY_CONFIG.SECONDARY_XOR_KEY or "")
+    local signature = base64Encode(encrypted2)
+    
+    -- API validation with nil check
+    local apiHash = generateSecureHash((SECURITY_CONFIG.API_VALIDATION_HASH or "") .. timestamp)
+    
+    return {
+        ["Content-Type"] = "application/json",
+        ["Authorization"] = "Bearer " .. (SUPABASE_CONFIG.ANON_KEY or ""),
+        ["apikey"] = SUPABASE_CONFIG.ANON_KEY or "",
+        ["X-Master-Token"] = SECURITY_CONFIG.MASTER_TOKEN or "",
+        ["X-Signature"] = signature,
+        ["X-Timestamp"] = timestamp,
+        ["X-Nonce"] = nonce,
+        ["X-Session"] = SECURITY_CONFIG.SESSION_TOKEN or "",
+        ["X-API-Hash"] = apiHash,
+        ["X-Security-Level"] = tostring(SystemState.securityLevel),
+        ["Prefer"] = "return=minimal",
+    }
+end
+
+-- Supabase header helper (her zaman doğru key ve url ile)
+local function getSupabaseHeaders()
+    assert(SUPABASE_CONFIG and SUPABASE_CONFIG.URL and SUPABASE_CONFIG.ANON_KEY, "Supabase URL ve ANON_KEY tanımlı olmalı!")
+    return {
+        ["apikey"] = SUPABASE_CONFIG.ANON_KEY,
+        ["Authorization"] = "Bearer " .. SUPABASE_CONFIG.ANON_KEY,
+        ["Content-Type"] = "application/json"
+    }
+end
+
+-- Tüm request fonksiyonlarında bu header fonksiyonu kullanılıyor
+-- Ayrıca, print ve loglarda tostring ile nil koruması ekliyorum
+
+-- Örnek: log veya print
+-- print("Body: " .. tostring(response.Body))
+
+-- testDatabaseConnection fonksiyonu
+local function testDatabaseConnection()
+    DebugLogger:log("DEBUG", "testDatabaseConnection başlıyor")
+    local currentTime = os.time()
+    if currentTime - SystemState.lastConnectionTest < 30 then
+        DebugLogger:log("DEBUG", "testDatabaseConnection: cache kullanıldı, status: " .. tostring(SystemState.connectionStatus))
+        return SystemState.connectionStatus == "healthy"
+    end
+    SystemState.lastConnectionTest = currentTime
+    local response = request({
+        Url = SUPABASE_CONFIG.URL .. "/rest/v1/system_settings?limit=1",
+        Method = "GET",
+        Headers = getSupabaseHeaders()
+    })
+    DebugLogger:log("DEBUG", "testDatabaseConnection sonucu: Success=" .. tostring(response.Success) .. ", StatusCode=" .. tostring(response.StatusCode) .. ", StatusMessage=" .. tostring(response.StatusMessage) .. ", Body=" .. tostring(response.Body))
+    if response.Success and response.StatusCode == 200 then
+        local HttpService = game:GetService("HttpService")
+        local parseSuccess, data = pcall(function()
+            return HttpService:JSONDecode(response.Body)
+        end)
+        DebugLogger:log("DEBUG", "testDatabaseConnection JSON parse: " .. tostring(parseSuccess) .. ", data type: " .. type(data))
+        if parseSuccess and type(data) == "table" then
+            SystemState.connectionStatus = "healthy"
+            SystemState.successCount = SystemState.successCount + 1
+            return true
+        else
+            SystemState.connectionStatus = "parse_error"
+            SystemState.errorCount = SystemState.errorCount + 1
+            DebugLogger:log("ERROR", "Database response parse failed")
+            return false
+        end
+    else
+        SystemState.connectionStatus = "network_error"
+        SystemState.errorCount = SystemState.errorCount + 1
+        DebugLogger:log("ERROR", "Database connection failed: " .. tostring(response.StatusCode) .. " - " .. tostring(response.StatusMessage) .. ", Body=" .. tostring(response.Body))
+        return false
+    end
+end
+
+-- Get system information with enhanced validation (FIXED)
+local function getSystemInfo()
+    local Players = game:GetService("Players")
+    local player = Players.LocalPlayer
+    
+    if not player then
+        DebugLogger:log("ERROR", "No local player found")
+        return nil
+    end
+    
+    local hwid = ""
+    local hwidSuccess = pcall(function()
+        local RbxAnalyticsService = game:GetService("RbxAnalyticsService")
+        hwid = RbxAnalyticsService:GetClientId()
+    end)
+    
+    if not hwidSuccess or not hwid or hwid == "" then
+        hwid = "UNKNOWN_" .. tostring(math.random(100000, 999999))
+    end
+    
+    local executor = "Unknown"
+    pcall(function()
+        if identifyexecutor then
+            executor = identifyexecutor()
+        elseif getexecutorname then
+            executor = getexecutorname()
+        end
+    end)
+    
+    local accountAge = player.AccountAge or 0
+    local ageString = ""
+    if accountAge >= 365 then
+        ageString = math.floor(accountAge / 365) .. "y"
+    else
+        ageString = accountAge .. "d"
+    end
+    
+    local systemInfo = {
+        username = player.Name or "Unknown",
+        displayName = player.DisplayName or player.Name or "Unknown",
+        accountAge = ageString,
+        hwid = hwid,
+        executor = executor,
+        userId = tostring(player.UserId or 0),
+    }
+    
+    return systemInfo
+end
+
+-- Enhanced security check (FIXED)
+local function performSecurityCheck()
+    DebugLogger:log("DEBUG", "performSecurityCheck başlıyor")
+    local currentTime = os.time()
+    
+    -- Rate limiting
+    if currentTime - SystemState.lastSecurityCheck < 5 then
+        DebugLogger:log("DEBUG", "performSecurityCheck: rate limit")
+        return false
+    end
+    
+    SystemState.lastSecurityCheck = currentTime
+    
+    -- Validate critical tokens
+    if not SECURITY_CONFIG.MASTER_TOKEN or SECURITY_CONFIG.MASTER_TOKEN == "" or 
+       not SECURITY_CONFIG.SIGNATURE_KEY or SECURITY_CONFIG.SIGNATURE_KEY == "" then
+        DebugLogger:log("ERROR", "Critical security tokens missing")
+        return false
+    end
+    
+    -- Check system integrity
+    if not game:GetService("Players").LocalPlayer then
+        DebugLogger:log("ERROR", "System integrity check failed - no local player")
+        return false
+    end
+    
+    -- Test database connection
+    local dbResult = testDatabaseConnection()
+    DebugLogger:log("DEBUG", "performSecurityCheck: testDatabaseConnection sonucu: " .. tostring(dbResult))
+    if not dbResult then
+        DebugLogger:log("ERROR", "Security check failed - database connection issue")
+        return false
+    end
+    
+    SystemState.securityLevel = SystemState.securityLevel + 1
+    DebugLogger:log("DEBUG", "performSecurityCheck başarılı")
+    return true
+end
+
+-- loadNotifications fonksiyonu
+local function loadNotifications()
+    if not testDatabaseConnection() then
+        return false
+    end
+    local response = request({
+        Url = SUPABASE_CONFIG.URL .. "/rest/v1/system_notifications?is_active=eq.true",
+        Method = "GET",
+        Headers = getSupabaseHeaders()
+    })
+    if response.Success and response.StatusCode == 200 then
+        local HttpService = game:GetService("HttpService")
+        local parseSuccess, data = pcall(function()
+            return HttpService:JSONDecode(response.Body)
+        end)
+        if parseSuccess and type(data) == "table" then
+            SecureCache.notifications = {}
+            for _, notification in pairs(data) do
+                if notification and notification.event_type then
+                    SecureCache.notifications[notification.event_type] = {
+                        title = notification.title or "System Message",
+                        message = notification.message or "No message",
+                        icon = notification.icon or "ℹ️",
+                        color = notification.color or "blue",
+                    }
+                end
+            end
+            return true
+        end
+    end
+    return false
+end
+
+-- Get notification with fallback (FIXED)
+local function getNotification(eventType)
+    if SecureCache.notifications and SecureCache.notifications[eventType] then
+        return SecureCache.notifications[eventType]
+    end
+    
+    -- Enhanced fallback notifications
+    local fallbacks = {
+        user_validated = {title = "Access Granted", message = "Welcome to Kanistay Hub!", icon = "✅", color = "green"},
+        user_banned = {title = "Access Denied", message = "Your access has been restricted.", icon = "🚫", color = "red"},
+        user_premium = {title = "Premium Access", message = "Premium features unlocked!", icon = "👑", color = "gold"},
+        system_keyless = {title = "Keyless Mode", message = "No key required.", icon = "🔓", color = "blue"},
+        system_disabled = {title = "System Disabled", message = "Under maintenance.", icon = "🔧", color = "orange"},
+        key_invalid = {title = "Invalid Key", message = "Key is invalid or expired.", icon = "❌", color = "red"},
+        key_used = {title = "Key In Use", message = "Key is being used elsewhere.", icon = "⚠️", color = "yellow"},
+        network_error = {title = "Connection Error", message = "Network error occurred.", icon = "🌐", color = "red"},
+        hwid_mismatch = {title = "Device Mismatch", message = "Key registered to different device.", icon = "🔒", color = "red"},
+        setup_complete = {title = "Setup Complete", message = "System ready!", icon = "🚀", color = "green"},
+    }
+    
+    return fallbacks[eventType] or {title = "System Message", message = "Unknown event", icon = "ℹ️", color = "blue"}
+end
+
+-- loadSystemSettings fonksiyonu
+local function loadSystemSettings()
+    DebugLogger:log("DEBUG", "loadSystemSettings başlıyor")
+    if not performSecurityCheck() then
+        DebugLogger:log("ERROR", "loadSystemSettings: performSecurityCheck başarısız")
+        return false
+    end
+    local currentTime = os.time()
+    if currentTime - SecureCache.lastUpdate < 300 and SecureCache.settings and SecureCache.settings.loaded then
+        DebugLogger:log("DEBUG", "loadSystemSettings: cache kullanıldı")
+        ProtectedFlags.keylessMode = SecureCache.settings.is_keyless or false
+        ProtectedFlags.hwidCheck = SecureCache.settings.is_hwid_check or true
+        ProtectedFlags.maintenanceMode = SecureCache.settings.maintenance_mode or false
+        return true
+    end
+    local response = request({
+        Url = SUPABASE_CONFIG.URL .. "/rest/v1/system_settings",
+        Method = "GET",
+        Headers = getSupabaseHeaders()
+    })
+    DebugLogger:log("DEBUG", "loadSystemSettings response: Success=" .. tostring(response.Success) .. ", StatusCode=" .. tostring(response.StatusCode) .. ", StatusMessage=" .. tostring(response.StatusMessage) .. ", Body=" .. tostring(response.Body))
+    if response.Success and response.StatusCode == 200 then
+        local HttpService = game:GetService("HttpService")
+        local parseSuccess, data = pcall(function()
+            return HttpService:JSONDecode(response.Body)
+        end)
+        DebugLogger:log("DEBUG", "loadSystemSettings JSON parse: " .. tostring(parseSuccess) .. ", data type: " .. type(data))
+        if parseSuccess and type(data) == "table" then
+            SecureCache.settings = {}
+            for _, setting in pairs(data) do
+                if setting and setting.setting_key then
+                    SecureCache.settings[setting.setting_key] = setting.setting_value
+                end
+            end
+            SecureCache.settings.loaded = true
+            SecureCache.lastUpdate = currentTime
+            SecureCache.cacheSignature = generateSecureHash(response.Body)
+            ProtectedFlags.keylessMode = SecureCache.settings.is_keyless or false
+            ProtectedFlags.hwidCheck = SecureCache.settings.is_hwid_check or true
+            ProtectedFlags.maintenanceMode = SecureCache.settings.maintenance_mode or false
+            DebugLogger:log("DEBUG", "loadSystemSettings başarılı")
+            return true
+        end
+    end
+    DebugLogger:log("ERROR", "loadSystemSettings başarısız")
+    return false
+end
+
+-- checkHWIDStatus fonksiyonu
+local function checkHWIDStatus(hwid)
+    if not hwid or hwid == "" then
+        return false, false, "Invalid HWID", ""
+    end
+    if not performSecurityCheck() then
+        return false, false, "Security check failed", ""
+    end
+    local cacheKey = generateSecureHash(hwid .. (SECURITY_CONFIG.SESSION_TOKEN or ""))
+    if SecureCache.userStatus and SecureCache.userStatus[cacheKey] and 
+       os.time() - SecureCache.userStatus[cacheKey].timestamp < 300 then
+        local status = SecureCache.userStatus[cacheKey]
+        return status.isPremium, status.isBanned, status.note, status.timeRemaining
+    end
+    local response = request({
+        Url = SUPABASE_CONFIG.URL .. "/rest/v1/advanced_keys?hwid=eq." .. hwid,
+        Method = "GET",
+        Headers = getSupabaseHeaders()
+    })
+    if response.Success and response.StatusCode == 200 then
+        local HttpService = game:GetService("HttpService")
+        local parseSuccess, data = pcall(function()
+            return HttpService:JSONDecode(response.Body)
+        end)
+        if parseSuccess and type(data) == "table" and #data > 0 then
+            local hwidData = data[1]
+            if hwidData then
+                local isPremium = hwidData.is_premium or false
+                local isBanned = not isPremium
+                local note = hwidData.note or ""
+                local timeRemaining = hwidData.time_remaining or "Lifetime"
+                if not SecureCache.userStatus then
+                    SecureCache.userStatus = {}
+                end
+                SecureCache.userStatus[cacheKey] = {
+                    isPremium = isPremium,
+                    isBanned = isBanned,
+                    note = note,
+                    timeRemaining = timeRemaining,
+                    timestamp = os.time()
+                }
+                return isPremium, isBanned, note, timeRemaining
+            end
+        end
+    end
+    if not SecureCache.userStatus then
+        SecureCache.userStatus = {}
+    end
+    SecureCache.userStatus[cacheKey] = {
+        isPremium = false,
+        isBanned = false,
+        note = "",
+        timeRemaining = "",
+        timestamp = os.time()
+    }
+    return false, false, "", ""
+end
+
+-- validateKeyInDatabase fonksiyonu
+local function validateKeyInDatabase(keyValue, systemInfo)
+    if not keyValue or keyValue == "" or not systemInfo then
+        return false, "key_invalid"
+    end
+    if not SystemState.validationAllowed then
+        return false, "network_error"
+    end
+    local headers = getSupabaseHeaders()
+    local response = request({
+        Url = SUPABASE_CONFIG.URL .. "/rest/v1/normal_keys?key_value=eq." .. keyValue,
+        Method = "GET",
+        Headers = headers
+    })
+    if not response.Success or response.StatusCode ~= 200 then
+        DebugLogger:log("ERROR", "Network error during key validation: " .. tostring(response.StatusCode) .. " - " .. tostring(response.StatusMessage))
+        return false, "network_error"
+    end
+    local HttpService = game:GetService("HttpService")
+    local parseSuccess, data = pcall(function()
+        return HttpService:JSONDecode(response.Body)
+    end)
+    if not parseSuccess or type(data) ~= "table" then
+        DebugLogger:log("ERROR", "Failed to parse key validation response")
+        return false, "network_error"
+    end
+    if #data == 0 then
+        return false, "key_invalid"
+    end
+    local keyData = data[1]
+    if not keyData then
+        return false, "key_invalid"
+    end
+    if keyData.status == "unused" then
+        -- First time use
+        local updateData = {
+            status = "active",
+            user_id = systemInfo.username,
+            display_name = systemInfo.displayName,
+            hwid = systemInfo.hwid,
+            executor = systemInfo.executor,
+            used_at = os.date("!%Y-%m-%dT%H:%M:%SZ")
+        }
+        local postResponse = request({
+            Url = SUPABASE_CONFIG.URL .. "/rest/v1/normal_keys?id=eq." .. keyData.id,
+            Method = "POST",
+            Body = HttpService:JSONEncode(updateData),
+            Headers = headers
+        })
+        if postResponse.Success and (postResponse.StatusCode == 200 or postResponse.StatusCode == 201 or postResponse.StatusCode == 204) then
+            return true, "user_validated"
+        else
+            DebugLogger:log("ERROR", "Key activation failed: " .. tostring(postResponse.StatusCode) .. " - " .. tostring(postResponse.StatusMessage))
+            return false, "network_error"
+        end
+    elseif keyData.status == "active" then
+        if ProtectedFlags.hwidCheck then
+            if keyData.hwid == systemInfo.hwid then
+                -- Same user - update info
+                local updateData = {
+                    user_id = systemInfo.username,
+                    display_name = systemInfo.displayName,
+                    executor = systemInfo.executor,
+                    used_at = os.date("!%Y-%m-%dT%H:%M:%SZ")
+                }
+                request({
+                    Url = SUPABASE_CONFIG.URL .. "/rest/v1/normal_keys?id=eq." .. keyData.id,
+                    Method = "POST",
+                    Body = HttpService:JSONEncode(updateData),
+                    Headers = headers
+                })
+                return true, "user_validated"
+            else
+                return false, "hwid_mismatch"
+            end
+        else
+            -- HWID check disabled
+            local updateData = {
+                user_id = systemInfo.username,
+                display_name = systemInfo.displayName,
+                hwid = systemInfo.hwid,
+                executor = systemInfo.executor,
+                used_at = os.date("!%Y-%m-%dT%H:%M:%SZ")
+            }
+            request({
+                Url = SUPABASE_CONFIG.URL .. "/rest/v1/normal_keys?id=eq." .. keyData.id,
+                Method = "POST",
+                Body = HttpService:JSONEncode(updateData),
+                Headers = headers
+            })
+            return true, "user_validated"
+        end
+    else
+        return false, "key_invalid"
+    end
+end
+
+-- Main validation function with comprehensive error handling (FIXED)
+function KeyValidator.ValidateKey(keyValue, callback)
+    local settings = loadSystemSettings()
+    if not settings then
+        callback(false, getNotification("network_error"))
+        return
+    end
+    local systemInfo = getSystemInfo()
+    if not keyValue or keyValue == "" then
+        local notif = getNotification("key_invalid")
+        notif.message = "Please enter a key"
+        callback(false, notif)
+        return
+    end
+    local keyData = getNormalKey(keyValue)
+    if not keyData then
+        callback(false, getNotification("key_invalid"))
+        return
+    end
+    if settings.is_hwid_check and keyData.hwid and keyData.hwid ~= systemInfo.hwid then
+        callback(false, getNotification("hwid_mismatch"))
+        return
+    end
+    updateKeyWithUserInfo(keyValue, systemInfo)
+    callback(true, getNotification("user_validated"))
+end
+
+-- Enhanced setup function (FIXED)
+function KeyValidator.Setup(callback)
+    local settings = loadSystemSettings()
+    if not settings then
+        local notif = getNotification("network_error")
+        callback(false, "error", notif)
+        return
+    end
+    if settings.maintenance_mode then
+        local notif = getNotification("system_disabled")
+        callback(false, "maintenance", notif)
+        return
+    end
+    local systemInfo = getSystemInfo()
+    local isPremium, isBanned, note, timeRemaining = checkHWIDStatus(systemInfo.hwid)
+    if isBanned then
+        local notif = getNotification("user_banned")
+        notif.message = note
+        callback(false, "banned", notif)
+        return
+    end
+    if isPremium then
+        local notif = getNotification("user_premium")
+        notif.message = "Premium access (" .. timeRemaining .. ")"
+        callback(true, "premium", notif)
+        return
+    end
+    if settings.is_keyless then
+        local notif = getNotification("system_keyless")
+        callback(true, "keyless", notif)
+        return
+    end
+    callback(true, "normal", getNotification("setup_complete"))
+end
+
+-- Debug functions
+function KeyValidator.GetDebugLogs()
+    return DebugLogger:getLogs()
+end
+
+function KeyValidator.ClearDebugLogs()
+    DebugLogger:clearLogs()
+end
+
+function KeyValidator.GetSystemStatus()
+    return {
+        systemState = SystemState,
+        protectedFlags = ProtectedFlags,
+        connectionStatus = SystemState.connectionStatus,
+        errorCount = SystemState.errorCount,
+        successCount = SystemState.successCount,
+        cacheStatus = {
+            settingsLoaded = (SecureCache.settings and SecureCache.settings.loaded) or false,
+            lastUpdate = SecureCache.lastUpdate,
+            notificationCount = SecureCache.notifications and #SecureCache.notifications or 0,
+        }
+    }
+end
+
+-- Get protected flags (read-only)
+function KeyValidator.GetFlags()
+    return {
+        isPremium = ProtectedFlags.isPremium,
+        isBanned = ProtectedFlags.isBanned,
+        isValidated = ProtectedFlags.isValidated,
+        keylessMode = ProtectedFlags.keylessMode,
+        hwidCheck = ProtectedFlags.hwidCheck,
+        maintenanceMode = ProtectedFlags.maintenanceMode,
+        setupComplete = ProtectedFlags.setupComplete,
+    }
+end
+
+-- Get system state (read-only)
+function KeyValidator.GetSystemState()
+    return {
+        initialized = SystemState.initialized,
+        setupAllowed = SystemState.setupAllowed,
+        validationAllowed = SystemState.validationAllowed,
+        securityLevel = SystemState.securityLevel,
+        connectionStatus = SystemState.connectionStatus,
+    }
+end
+
+-- Get link for key generation
+function KeyValidator.GetLink()
+    return "https://kanistay.vercel.app/"
+end
+
+-- Initialize validator with enhanced security and debugging (FIXED)
+function KeyValidator.Init()
+    if SystemState.initialized then
+        return false
+    end
+    
+    SystemState.initialized = true
+    SystemState.securityLevel = 1
+    
+    print("╔══════════════════════════════════════════════════════════╗")
+    print("║              KANISTAY KEY VALIDATOR v4.0                 ║")
+    print("║            ENHANCED DEBUG & SECURITY SYSTEM              ║")
+    print("║              COMPATIBLE WITH LUA 5.1/5.2                 ║")
+    print("╚══════════════════════════════════════════════════════════╝")
+    print("🔒 Security Features: Multi-Layer Encryption, Enhanced Validation, Debug Logging")
+    print("🚀 Session Token: " .. (SECURITY_CONFIG.SESSION_TOKEN or "UNKNOWN"))
+    print("🐛 Debug Mode: " .. (SECURITY_CONFIG.DEBUG_MODE and "ENABLED" or "DISABLED"))
+    print("⚡ Lua Version: Compatible with 5.1/5.2")
+    
+    -- Test initial connection
+    testDatabaseConnection()
+    
+    return true
+end
+
+return KeyValidator
