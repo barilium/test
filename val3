@@ -1,0 +1,648 @@
+--[[
+    ╔══════════════════════════════════════════════════════════════════════════════╗
+    ║                        KANISTAY KEY VALIDATOR v3.0                           ║
+    ║                     CRITICAL SECURITY CONFIGURATION                          ║
+    ╚══════════════════════════════════════════════════════════════════════════════╝
+]]--
+
+-- ⚠️  CRITICAL SECURITY TOKENS - CHANGE THESE TO INVALIDATE OLD SYSTEMS ⚠️
+local SECURITY_CONFIG = {
+    -- Master validation token (change this to invalidate all old key systems)
+    MASTER_TOKEN = "KANI_SECURE_2024_V3",
+    
+    -- System signature key (used for request signing)
+    SIGNATURE_KEY = "KanistayMasterSig2024",
+    
+    -- Encryption keys
+    PRIMARY_XOR_KEY = "KanistaySecureXOR2024",
+    SECONDARY_XOR_KEY = "ValidatorEncrypt2024",
+    
+    -- API validation hash
+    API_VALIDATION_HASH = "7f8a9b2c3d4e5f6a1b2c3d4e5f6a7b8c",
+    
+    -- Session token (changes every system restart)
+    SESSION_TOKEN = tostring(math.random(100000, 999999)) .. "_" .. tostring(os.time()),
+}
+
+-- 🔒 SUPABASE CONFIGURATION (PROTECTED)
+local SUPABASE_CONFIG = {
+    URL = "https://nheljqlonhodbgpcfkww.supabase.co",
+    ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5oZWxqcWxvbmhvZGJncGNma3d3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTE5NzQ2MjQsImV4cCI6MjA2NzU1MDYyNH0.MtcA4YjKFWKsSPQMUG-SXOA1Ue1dml6v5Urdr0ISMnQ",
+    SERVICE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5oZWxqcWxvbmhvZGJncGNma3d3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1MTk3NDYyNCwiZXhwIjoyMDY3NTUwNjI0fQ.0nspphu2HDg-irLhHQirwoJPHAUSMqEFEJvmq5FgK0g",
+    JWT_SECRET = "z0I3clqZs9M1XqaUi1MXxGBbFy7KhtvPITq7/Q34BaWxsPDxyt+zj3Np6b2J1U3JlPi71bE629FI3ExySaAIMw==",
+}
+
+--[[
+    ╔══════════════════════════════════════════════════════════════════════════════╗
+    ║                            MAIN VALIDATOR CODE                               ║
+    ╚══════════════════════════════════════════════════════════════════════════════╝
+]]--
+
+local KeyValidator = {}
+
+-- System state and flags
+local SystemState = {
+    initialized = false,
+    setupAllowed = false,
+    validationAllowed = false,
+    securityLevel = 0,
+    lastSecurityCheck = 0,
+}
+
+-- Cache system with security
+local SecureCache = {
+    settings = {},
+    userStatus = {},
+    notifications = {},
+    lastUpdate = 0,
+    cacheSignature = "",
+}
+
+-- System flags with protection
+local ProtectedFlags = {
+    isPremium = false,
+    isBanned = false,
+    isValidated = false,
+    keylessMode = false,
+    hwidCheck = true,
+    maintenanceMode = false,
+    setupComplete = false,
+}
+
+-- Security utilities
+local function generateSecureHash(data)
+    local hash = 0
+    for i = 1, #data do
+        hash = ((hash * 31) + string.byte(data, i)) % 2147483647
+    end
+    return tostring(hash)
+end
+
+local function xorEncrypt(data, key)
+    local result = {}
+    local keyLen = #key
+    for i = 1, #data do
+        local char = string.byte(data, i)
+        local keyChar = string.byte(key, ((i - 1) % keyLen) + 1)
+        table.insert(result, string.char(bit32.bxor(char, keyChar)))
+    end
+    return table.concat(result)
+end
+
+local function base64Encode(data)
+    local chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+    local result = ''
+    
+    for i = 1, #data, 3 do
+        local a, b, c = string.byte(data, i, i + 2)
+        b = b or 0
+        c = c or 0
+        
+        local bitmap = a * 65536 + b * 256 + c
+        
+        for j = 18, 0, -6 do
+            local index = math.floor(bitmap / 2^j) % 64 + 1
+            result = result .. chars:sub(index, index)
+        end
+    end
+    
+    local padding_length = (3 - #data % 3) % 3
+    result = result:sub(1, #result - padding_length) .. string.rep('=', padding_length)
+    
+    return result
+end
+
+-- Create ultra-secure headers
+local function createSecureHeaders()
+    local timestamp = tostring(os.time())
+    local nonce = tostring(math.random(100000, 999999))
+    
+    -- Multi-layer encryption
+    local payload = SECURITY_CONFIG.MASTER_TOKEN .. "|" .. timestamp .. "|" .. nonce
+    local encrypted1 = xorEncrypt(payload, SECURITY_CONFIG.PRIMARY_XOR_KEY)
+    local encrypted2 = xorEncrypt(encrypted1, SECURITY_CONFIG.SECONDARY_XOR_KEY)
+    local signature = base64Encode(encrypted2)
+    
+    -- API validation
+    local apiHash = generateSecureHash(SECURITY_CONFIG.API_VALIDATION_HASH .. timestamp)
+    
+    return {
+        ["Content-Type"] = "application/json",
+        ["Authorization"] = "Bearer " .. SUPABASE_CONFIG.ANON_KEY,
+        ["apikey"] = SUPABASE_CONFIG.ANON_KEY,
+        ["X-Master-Token"] = SECURITY_CONFIG.MASTER_TOKEN,
+        ["X-Signature"] = signature,
+        ["X-Timestamp"] = timestamp,
+        ["X-Nonce"] = nonce,
+        ["X-Session"] = SECURITY_CONFIG.SESSION_TOKEN,
+        ["X-API-Hash"] = apiHash,
+        ["X-Security-Level"] = tostring(SystemState.securityLevel),
+    }
+end
+
+-- Get system information with security checks
+local function getSystemInfo()
+    local Players = game:GetService("Players")
+    local RbxAnalyticsService = game:GetService("RbxAnalyticsService")
+    local player = Players.LocalPlayer
+    
+    if not player then
+        return nil
+    end
+    
+    local hwid = ""
+    pcall(function()
+        hwid = RbxAnalyticsService:GetClientId()
+    end)
+    
+    if hwid == "" then
+        hwid = "UNKNOWN_" .. tostring(math.random(100000, 999999))
+    end
+    
+    local executor = "Unknown"
+    pcall(function()
+        if identifyexecutor then
+            executor = identifyexecutor()
+        elseif getexecutorname then
+            executor = getexecutorname()
+        end
+    end)
+    
+    local accountAge = player.AccountAge
+    local ageString = ""
+    if accountAge >= 365 then
+        ageString = math.floor(accountAge / 365) .. "y"
+    else
+        ageString = accountAge .. "d"
+    end
+    
+    return {
+        username = player.Name,
+        displayName = player.DisplayName,
+        accountAge = ageString,
+        hwid = hwid,
+        executor = executor,
+        userId = tostring(player.UserId),
+    }
+end
+
+-- Load notifications from database
+local function loadNotifications()
+    local success, response = pcall(function()
+        return game:HttpGet(SUPABASE_CONFIG.URL .. "/rest/v1/system_notifications?is_active=eq.true", true)
+    end)
+    
+    if success then
+        local data = game:GetService("HttpService"):JSONDecode(response)
+        SecureCache.notifications = {}
+        
+        for _, notification in pairs(data) do
+            if notification.event_type then
+                SecureCache.notifications[notification.event_type] = {
+                    title = notification.title,
+                    message = notification.message,
+                    icon = notification.icon,
+                    color = notification.color,
+                }
+            end
+        end
+        
+        return true
+    end
+    
+    return false
+end
+
+-- Get notification message
+local function getNotification(eventType)
+    if SecureCache.notifications[eventType] then
+        return SecureCache.notifications[eventType]
+    end
+    
+    -- Fallback notifications
+    local fallbacks = {
+        user_validated = {title = "✅ Access Granted", message = "Welcome to Kanistay Hub!", icon = "✅", color = "green"},
+        user_banned = {title = "🚫 Access Denied", message = "Your access has been restricted.", icon = "🚫", color = "red"},
+        user_premium = {title = "👑 Premium Access", message = "Premium features unlocked!", icon = "👑", color = "gold"},
+        system_keyless = {title = "🔓 Keyless Mode", message = "No key required.", icon = "🔓", color = "blue"},
+        system_disabled = {title = "🔧 System Disabled", message = "Under maintenance.", icon = "🔧", color = "orange"},
+        key_invalid = {title = "❌ Invalid Key", message = "Key is invalid or expired.", icon = "❌", color = "red"},
+        key_used = {title = "⚠️ Key In Use", message = "Key is being used elsewhere.", icon = "⚠️", color = "yellow"},
+        network_error = {title = "🌐 Connection Error", message = "Network error occurred.", icon = "🌐", color = "red"},
+        hwid_mismatch = {title = "🔒 Device Mismatch", message = "Key registered to different device.", icon = "🔒", color = "red"},
+        setup_complete = {title = "🚀 Setup Complete", message = "System ready!", icon = "🚀", color = "green"},
+    }
+    
+    return fallbacks[eventType] or {title = "ℹ️ System Message", message = "Unknown event", icon = "ℹ️", color = "blue"}
+end
+
+-- Security check function
+local function performSecurityCheck()
+    local currentTime = os.time()
+    
+    -- Rate limiting
+    if currentTime - SystemState.lastSecurityCheck < 5 then
+        return false
+    end
+    
+    SystemState.lastSecurityCheck = currentTime
+    
+    -- Validate critical tokens
+    if SECURITY_CONFIG.MASTER_TOKEN == "" or SECURITY_CONFIG.SIGNATURE_KEY == "" then
+        return false
+    end
+    
+    -- Check system integrity
+    if not game:GetService("Players").LocalPlayer then
+        return false
+    end
+    
+    SystemState.securityLevel = SystemState.securityLevel + 1
+    return true
+end
+
+-- Load system settings with security
+local function loadSystemSettings()
+    if not performSecurityCheck() then
+        return false
+    end
+    
+    local currentTime = os.time()
+    
+    -- Use cache if valid
+    if currentTime - SecureCache.lastUpdate < 300 and SecureCache.settings.loaded then
+        ProtectedFlags.keylessMode = SecureCache.settings.is_keyless or false
+        ProtectedFlags.hwidCheck = SecureCache.settings.is_hwid_check or true
+        ProtectedFlags.maintenanceMode = SecureCache.settings.maintenance_mode or false
+        return true
+    end
+    
+    local headers = createSecureHeaders()
+    local success, response = pcall(function()
+        return game:HttpGet(SUPABASE_CONFIG.URL .. "/rest/v1/system_settings", true)
+    end)
+    
+    if success then
+        local data = game:GetService("HttpService"):JSONDecode(response)
+        SecureCache.settings = {}
+        
+        for _, setting in pairs(data) do
+            SecureCache.settings[setting.setting_key] = setting.setting_value
+        end
+        
+        SecureCache.settings.loaded = true
+        SecureCache.lastUpdate = currentTime
+        SecureCache.cacheSignature = generateSecureHash(response)
+        
+        ProtectedFlags.keylessMode = SecureCache.settings.is_keyless or false
+        ProtectedFlags.hwidCheck = SecureCache.settings.is_hwid_check or true
+        ProtectedFlags.maintenanceMode = SecureCache.settings.maintenance_mode or false
+        
+        return true
+    end
+    
+    return false
+end
+
+-- Check HWID status with security
+local function checkHWIDStatus(hwid)
+    if not performSecurityCheck() then
+        return false, false, "Security check failed", ""
+    end
+    
+    -- Check cache first
+    local cacheKey = generateSecureHash(hwid .. SECURITY_CONFIG.SESSION_TOKEN)
+    if SecureCache.userStatus[cacheKey] and os.time() - SecureCache.userStatus[cacheKey].timestamp < 300 then
+        local status = SecureCache.userStatus[cacheKey]
+        return status.isPremium, status.isBanned, status.note, status.timeRemaining
+    end
+    
+    local headers = createSecureHeaders()
+    local success, response = pcall(function()
+        return game:HttpGet(SUPABASE_CONFIG.URL .. "/rest/v1/advanced_keys?hwid=eq." .. hwid, true)
+    end)
+    
+    if success then
+        local data = game:GetService("HttpService"):JSONDecode(response)
+        
+        if #data > 0 then
+            local hwidData = data[1]
+            local isPremium = hwidData.is_premium
+            local isBanned = not isPremium
+            local note = hwidData.note or ""
+            local timeRemaining = hwidData.time_remaining or "Lifetime"
+            
+            -- Cache with security
+            SecureCache.userStatus[cacheKey] = {
+                isPremium = isPremium,
+                isBanned = isBanned,
+                note = note,
+                timeRemaining = timeRemaining,
+                timestamp = os.time()
+            }
+            
+            return isPremium, isBanned, note, timeRemaining
+        end
+    end
+    
+    -- Cache negative result
+    SecureCache.userStatus[cacheKey] = {
+        isPremium = false,
+        isBanned = false,
+        note = "",
+        timeRemaining = "",
+        timestamp = os.time()
+    }
+    
+    return false, false, "", ""
+end
+
+-- Secure key validation
+local function validateKeyInDatabase(keyValue, systemInfo)
+    if not SystemState.validationAllowed then
+        return false, "Validation not authorized"
+    end
+    
+    local headers = createSecureHeaders()
+    
+    local success, response = pcall(function()
+        return game:HttpGet(SUPABASE_CONFIG.URL .. "/rest/v1/normal_keys?key_value=eq." .. keyValue, true)
+    end)
+    
+    if not success then
+        return false, "network_error"
+    end
+    
+    local data = game:GetService("HttpService"):JSONDecode(response)
+    
+    if #data == 0 then
+        return false, "key_invalid"
+    end
+    
+    local keyData = data[1]
+    
+    if keyData.status == "unused" then
+        -- First time use
+        local updateData = {
+            status = "active",
+            user_id = systemInfo.username,
+            display_name = systemInfo.displayName,
+            hwid = systemInfo.hwid,
+            executor = systemInfo.executor,
+            used_at = os.date("!%Y-%m-%dT%H:%M:%SZ")
+        }
+        
+        local updateSuccess = pcall(function()
+            return game:HttpPost(
+                SUPABASE_CONFIG.URL .. "/rest/v1/normal_keys?id=eq." .. keyData.id,
+                game:GetService("HttpService"):JSONEncode(updateData),
+                Enum.HttpContentType.ApplicationJson,
+                headers
+            )
+        end)
+        
+        if updateSuccess then
+            return true, "user_validated"
+        else
+            return false, "network_error"
+        end
+        
+    elseif keyData.status == "active" then
+        if ProtectedFlags.hwidCheck then
+            if keyData.hwid == systemInfo.hwid then
+                -- Same user - update info
+                local updateData = {
+                    user_id = systemInfo.username,
+                    display_name = systemInfo.displayName,
+                    executor = systemInfo.executor,
+                    used_at = os.date("!%Y-%m-%dT%H:%M:%SZ")
+                }
+                
+                pcall(function()
+                    game:HttpPost(
+                        SUPABASE_CONFIG.URL .. "/rest/v1/normal_keys?id=eq." .. keyData.id,
+                        game:GetService("HttpService"):JSONEncode(updateData),
+                        Enum.HttpContentType.ApplicationJson,
+                        headers
+                    )
+                end)
+                
+                return true, "user_validated"
+            else
+                return false, "hwid_mismatch"
+            end
+        else
+            -- HWID check disabled
+            local updateData = {
+                user_id = systemInfo.username,
+                display_name = systemInfo.displayName,
+                hwid = systemInfo.hwid,
+                executor = systemInfo.executor,
+                used_at = os.date("!%Y-%m-%dT%H:%M:%SZ")
+            }
+            
+            pcall(function()
+                game:HttpPost(
+                    SUPABASE_CONFIG.URL .. "/rest/v1/normal_keys?id=eq." .. keyData.id,
+                    game:GetService("HttpService"):JSONEncode(updateData),
+                    Enum.HttpContentType.ApplicationJson,
+                    headers
+                )
+            end)
+            
+            return true, "user_validated"
+        end
+    else
+        return false, "key_invalid"
+    end
+end
+
+-- Main validation function with security
+function KeyValidator.ValidateKey(keyValue, callback)
+    if not SystemState.validationAllowed then
+        local notification = getNotification("network_error")
+        callback(false, notification)
+        return
+    end
+    
+    if not loadSystemSettings() then
+        local notification = getNotification("network_error")
+        callback(false, notification)
+        return
+    end
+    
+    if ProtectedFlags.maintenanceMode then
+        local notification = getNotification("system_disabled")
+        callback(false, notification)
+        return
+    end
+    
+    local systemInfo = getSystemInfo()
+    if not systemInfo then
+        local notification = getNotification("network_error")
+        callback(false, notification)
+        return
+    end
+    
+    local isPremium, isBanned, note, timeRemaining = checkHWIDStatus(systemInfo.hwid)
+    
+    ProtectedFlags.isPremium = isPremium
+    ProtectedFlags.isBanned = isBanned
+    
+    if isBanned then
+        local notification = getNotification("user_banned")
+        notification.message = note
+        callback(false, notification)
+        return
+    end
+    
+    if isPremium then
+        ProtectedFlags.isValidated = true
+        local notification = getNotification("user_premium")
+        notification.message = "Premium access (" .. timeRemaining .. ")"
+        callback(true, notification)
+        return
+    end
+    
+    if ProtectedFlags.keylessMode then
+        ProtectedFlags.isValidated = true
+        local notification = getNotification("system_keyless")
+        callback(true, notification)
+        return
+    end
+    
+    if not keyValue or keyValue == "" then
+        local notification = getNotification("key_invalid")
+        notification.message = "Please enter a key"
+        callback(false, notification)
+        return
+    end
+    
+    local isValid, eventType = validateKeyInDatabase(keyValue, systemInfo)
+    local notification = getNotification(eventType)
+    
+    if isValid then
+        ProtectedFlags.isValidated = true
+    end
+    
+    callback(isValid, notification)
+end
+
+-- Secure setup function
+function KeyValidator.Setup(callback)
+    if not performSecurityCheck() then
+        local notification = getNotification("network_error")
+        callback(false, "error", notification)
+        return
+    end
+    
+    -- Load notifications first
+    loadNotifications()
+    
+    if not loadSystemSettings() then
+        local notification = getNotification("network_error")
+        callback(false, "error", notification)
+        return
+    end
+    
+    if ProtectedFlags.maintenanceMode then
+        local notification = getNotification("system_disabled")
+        callback(false, "maintenance", notification)
+        return
+    end
+    
+    local systemInfo = getSystemInfo()
+    if not systemInfo then
+        local notification = getNotification("network_error")
+        callback(false, "error", notification)
+        return
+    end
+    
+    local isPremium, isBanned, note, timeRemaining = checkHWIDStatus(systemInfo.hwid)
+    
+    ProtectedFlags.isPremium = isPremium
+    ProtectedFlags.isBanned = isBanned
+    
+    if isBanned then
+        local notification = getNotification("user_banned")
+        notification.message = note
+        callback(false, "banned", notification)
+        return
+    end
+    
+    if isPremium then
+        ProtectedFlags.isValidated = true
+        SystemState.setupAllowed = true
+        SystemState.validationAllowed = true
+        ProtectedFlags.setupComplete = true
+        
+        local notification = getNotification("user_premium")
+        notification.message = "Premium access (" .. timeRemaining .. ")"
+        callback(true, "premium", notification)
+        return
+    end
+    
+    if ProtectedFlags.keylessMode then
+        ProtectedFlags.isValidated = true
+        SystemState.setupAllowed = true
+        SystemState.validationAllowed = true
+        ProtectedFlags.setupComplete = true
+        
+        local notification = getNotification("system_keyless")
+        callback(true, "keyless", notification)
+        return
+    end
+    
+    -- Normal user - allow validation
+    SystemState.validationAllowed = true
+    local notification = getNotification("setup_complete")
+    notification.message = "Key validation required"
+    callback(true, "normal", notification)
+end
+
+-- Get protected flags (read-only)
+function KeyValidator.GetFlags()
+    return {
+        isPremium = ProtectedFlags.isPremium,
+        isBanned = ProtectedFlags.isBanned,
+        isValidated = ProtectedFlags.isValidated,
+        keylessMode = ProtectedFlags.keylessMode,
+        hwidCheck = ProtectedFlags.hwidCheck,
+        maintenanceMode = ProtectedFlags.maintenanceMode,
+        setupComplete = ProtectedFlags.setupComplete,
+    }
+end
+
+-- Get system state (read-only)
+function KeyValidator.GetSystemState()
+    return {
+        initialized = SystemState.initialized,
+        setupAllowed = SystemState.setupAllowed,
+        validationAllowed = SystemState.validationAllowed,
+        securityLevel = SystemState.securityLevel,
+    }
+end
+
+-- Get link for key generation
+function KeyValidator.GetLink()
+    return "https://kanistay.vercel.app/"
+end
+
+-- Initialize validator with security
+function KeyValidator.Init()
+    if SystemState.initialized then
+        return false
+    end
+    
+    SystemState.initialized = true
+    SystemState.securityLevel = 1
+    
+    print("╔══════════════════════════════════════════════════════════╗")
+    print("║              KANISTAY KEY VALIDATOR v1.                  ║")
+    print("║               SECURITY LEVEL: MAXIMUM                   ║")
+    print("╚══════════════════════════════════════════════════════════╝")
+    
+    return true
+end
+
+return KeyValidator
